@@ -1,113 +1,120 @@
 import random
-from sklearn.neural_network import MLPClassifier
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.neural_network import MLPClassifier
+from collections import deque
 
-# Функция для стратегии случайного выбора
-def stag_hunt_strategy():
-    choice = random.choice(["Stag", "Hare"])
-    return choice
+# Параметры игры
+TOTAL_RESOURCES = 20  # Общее количество ресурсов (например, кусочков пиццы)
+NUM_ROUNDS = 100      # Количество раундов
+MEMORY_SIZE = 50      # Размер памяти для обучения нейросети
 
-# Функция для преобразования строк в числа
-def encode_choice(choice):
-    return 0 if choice == "Stag" else 1
+# Функция для случайного выбора
+def random_strategy():
+    return random.randint(0, TOTAL_RESOURCES // 2)  # Игрок берёт случайное количество ресурсов
 
-# Функция для преобразования чисел в строки
-def decode_choice(encoded_choice):
-    return "Stag" if encoded_choice == 0 else "Hare"
+# Функция для нейросетевой стратегии
+class NeuralNetworkStrategy:
+    def __init__(self):
+        self.model = MLPClassifier(hidden_layer_sizes=(10,), max_iter=1000, random_state=42)
+        self.memory = deque(maxlen=MEMORY_SIZE)  # Память для хранения истории игры
+        self.is_trained = False  # Флаг для проверки, была ли модель обучена
 
-# Функция для стратегии нейросети
-def neural_network_strategy(history):
-    if len(history) < 2:  # Нужно хотя бы два элемента для обучения
-        return random.choice(["Stag", "Hare"])
-    
-    # Преобразуем историю в признаки и метки
-    X = []
-    y = []
-    for i in range(1, len(history)):
-        X.append([encode_choice(history[i-1][0]), encode_choice(history[i-1][1])])
-        y.append(encode_choice(history[i][1]))
-    
-    X = np.array(X)
-    y = np.array(y)
-    
-    # Обучаем модель
-    model = MLPClassifier(hidden_layer_sizes=(10,), max_iter=1000)
-    model.fit(X, y)
-    
-    # Предсказываем следующий выбор
-    last_round = history[-1]
-    prediction = model.predict([[encode_choice(last_round[0]), encode_choice(last_round[1])]])
-    return decode_choice(prediction[0])
+    def choose_action(self, state):
+        if len(self.memory) < MEMORY_SIZE // 2 or not self.is_trained:  # Если памяти мало или модель не обучена, выбираем случайное действие
+            return random.randint(0, TOTAL_RESOURCES // 2)
 
-# Главная функция для тестирования стратегии
-def main():
-    num_rounds = 30
-    history = []
-    results = {
-        "Both Stag": 0,  # Оба выбрали Stag
-        "Both Hare": 0,  # Оба выбрали Hare
-        "Player1 Stag, Player2 Hare": 0,  # Игрок 1 выбрал Stag, Игрок 2 выбрал Hare
-        "Player1 Hare, Player2 Stag": 0,  # Игрок 1 выбрал Hare, Игрок 2 выбрал Stag
-    }
+        # Преобразуем состояние в формат для нейросети
+        X = np.array([state])
+        prediction = self.model.predict(X)
+        return int(prediction[0])
 
-    # Очки игроков
-    player1_score = 0
-    player2_score = 0
+    def remember(self, state, action, reward, next_state):
+        self.memory.append((state, action, reward, next_state))
 
-    for round in range(num_rounds):
-        player1_choice = stag_hunt_strategy()
-        
-        # Игрок 2 использует нейросеть для выбора
-        player2_choice = neural_network_strategy(history)
+    def train(self):
+        if len(self.memory) < MEMORY_SIZE:  # Обучаемся только при достаточном количестве данных
+            return
 
-        print(f"Раунд {round + 1}: Игрок 1 выбрал {player1_choice}, Игрок 2 выбрал {player2_choice}")
+        # Подготовка данных для обучения
+        batch = list(self.memory)
+        states = np.array([x[0] for x in batch])
+        actions = np.array([x[1] for x in batch])
+        rewards = np.array([x[2] for x in batch])
+        next_states = np.array([x[3] for x in batch])
 
-        # Логика для начисления очков
-        if player1_choice == "Stag" and player2_choice == "Stag":
-            print("Оба игрока успешно охотятся на оленя и получают по 4 очка!")
-            player1_score += 4
-            player2_score += 4
-            results["Both Stag"] += 1
-        elif player1_choice == "Stag" and player2_choice == "Hare":
-            print("Игрок 1 выбрал оленя, но Игрок 2 выбрал зайца. Игрок 2 получает 3 очка, Игрок 1 — 0.")
-            player2_score += 3
-            results["Player1 Stag, Player2 Hare"] += 1
-        elif player1_choice == "Hare" and player2_choice == "Stag":
-            print("Игрок 1 выбрал зайца, но Игрок 2 выбрал оленя. Игрок 1 получает 3 очка, Игрок 2 — 0.")
-            player1_score += 3
-            results["Player1 Hare, Player2 Stag"] += 1
-        else:
-            print("Оба игрока выбрали зайца и получают по 2 очка.")
-            player1_score += 2
-            player2_score += 2
-            results["Both Hare"] += 1
+        # Обучаем модель
+        self.model.fit(states, actions)
+        self.is_trained = True  # Устанавливаем флаг, что модель обучена
 
-        # Обновляем историю
-        history.append((player1_choice, player2_choice))
+# Функция для игры
+def play_game():
+    nn_strategy = NeuralNetworkStrategy()
+    random_score = 0
+    nn_score = 0
+    random_scores = []
+    nn_scores = []
 
-    # Вывод статистики
-    print("\nСтатистика за все раунды:")
-    for key, value in results.items():
-        print(f"{key}: {value} раз")
+    for round in range(NUM_ROUNDS):
+        # Состояние: сколько ресурсов осталось
+        remaining_resources = TOTAL_RESOURCES
+        state = [remaining_resources]
 
-    # Вывод итоговых очков
-    print(f"\nИтоговые очки:")
-    print(f"Игрок 1: {player1_score} очков")
-    print(f"Игрок 2: {player2_score} очков")
+        # Выбор действий игроков
+        random_action = random_strategy()
+        nn_action = nn_strategy.choose_action(state)
+
+        # Проверка, чтобы сумма действий не превышала доступные ресурсы
+        total_taken = random_action + nn_action
+        if total_taken > remaining_resources:
+            # Если ресурсов недостаточно, делим поровну
+            random_action = remaining_resources // 2
+            nn_action = remaining_resources // 2
+
+        # Начисление очков
+        random_score += random_action
+        nn_score += nn_action
+
+        # Обновление состояния
+        remaining_resources -= (random_action + nn_action)
+        next_state = [remaining_resources]
+
+        # Нейросеть запоминает результат
+        reward = nn_action  # Награда — это количество ресурсов, которые она взяла
+        nn_strategy.remember(state, nn_action, reward, next_state)
+
+        # Сохранение очков для графика
+        random_scores.append(random_score)
+        nn_scores.append(nn_score)
+
+        # Обучение нейросети по итогам раунда
+        nn_strategy.train()
+
+        # Вывод результатов раунда
+        print(f"Раунд {round + 1}:")
+        print(f"  Random взял {random_action}, Нейросеть взяла {nn_action}")
+        print(f"  Очки: Random = {random_score}, Нейросеть = {nn_score}")
+        print()
+
+    # Итоговые результаты
+    print("Игра завершена!")
+    print(f"Итоговые очки: Random = {random_score}, Нейросеть = {nn_score}")
+    if nn_score > random_score:
+        print("Нейросеть победила!")
+    elif nn_score < random_score:
+        print("Random победил!")
+    else:
+        print("Ничья!")
 
     # Построение графика
-    labels = list(results.keys())
-    values = list(results.values())
-
-    plt.figure(figsize=(10, 6))
-    plt.bar(labels, values, color=['blue', 'green', 'red', 'purple'])
-    plt.title("Результаты игры 'Охота на оленя'")
-    plt.xlabel("Тип исхода")
-    plt.ylabel("Количество раз")
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
+    plt.plot(random_scores, label='Random')
+    plt.plot(nn_scores, label='Neural Network')
+    plt.xlabel('Раунды')
+    plt.ylabel('Очки')
+    plt.title('Результаты игры')
+    plt.legend()
     plt.show()
 
+# Запуск игры
 if __name__ == "__main__":
-    main()
+    play_game()
